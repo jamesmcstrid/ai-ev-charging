@@ -1,0 +1,33 @@
+alias: "Säkerhet: Rädda huvudsäkringen"
+description: >-
+  Pausar tunga laster vid ihållande hög belastning (ignorerar startpikar).
+  Anpassa tröskel (24.5A) efter din huvudsäkring.
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.huset_max_fasbelastning  # Easee Equalizer / CT-klämma
+    above: 24.5                                 # Anpassa efter säkringsstorlek
+    for: "00:00:45"                             # Väntar ut startpikar
+actions:
+  # 1. Stoppa elbilsladdning FÖRST (störst last)
+  - action: easee.set_charger_dynamic_limit
+    target:
+      entity_id: switch.a1_laddboxen_aktiverad
+    data:
+      current: 0
+  # 2. Stäng av poolvärme
+  - action: switch.turn_off
+    target:
+      entity_id: switch.poolvarme_ovrigt_2
+  # 3. Notifiera
+  - action: notify.mobile_app_dennis_iphone2   # Ändra till din notify-tjänst
+    data:
+      title: ⚠️ HÖG BELASTNING
+      message: >-
+        Huvudsäkringen har legat över 24.5A i 45 sek! Laddningen är pausad och
+        poolvärmen är stängd.
+  - action: notify.mobile_app_linnea_iphone    # Ta bort eller ändra
+    data:
+      title: ⚠️ HÖG BELASTNING
+      message: >-
+        Huvudsäkringen har legat över 24.5A i 45 sek! Laddningen är pausad och
+        poolvärmen är stängd.
