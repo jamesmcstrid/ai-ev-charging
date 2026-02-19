@@ -1,0 +1,267 @@
+{
+  "name": "EV Smart Charging - AI Observer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "51679fd0-c798-4679-ac5b-e795ea810ee2",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.a1_status"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        208,
+        0
+      ],
+      "id": "c6757dc7-5566-4655-8d0c-1a03162bbdb6",
+      "name": "Get a state",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "kd7FvNd7hP2dnbMK",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.wv2zzzeb9rh001501_battery_level"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        416,
+        0
+      ],
+      "id": "1490bcb6-6fa5-43fa-91ab-84f74c839c51",
+      "name": "Get a state1",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "kd7FvNd7hP2dnbMK",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.nordpool_kwh_se3_sek_2_10_025"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        624,
+        0
+      ],
+      "id": "d2beb7e3-8992-4243-87f4-4a24091e0df8",
+      "name": "Get a state2",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "kd7FvNd7hP2dnbMK",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.solaredge_aktuell_effekt"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        816,
+        0
+      ],
+      "id": "4a9db74b-ccc9-4b24-b72f-b519aa8bf296",
+      "name": "Get a state3",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "kd7FvNd7hP2dnbMK",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatMistralCloud",
+      "typeVersion": 1,
+      "position": [
+        992,
+        176
+      ],
+      "id": "bad7b63a-8afd-4435-921f-ee4fef80a5a9",
+      "name": "Mistral Cloud Chat Model1",
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "9c2MYuy9BqykyWBC",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Här är aktuell status för mitt hem:\n\nEasee laddbox: {{ $('Get a state').item.json.state }}\nBil batteri (SoC): {{ $('Get a state1').item.json.state }}%\nElpris just nu: {{ $('Get a state2').item.json.state }} kr/kWh\nSolproduktion: {{ $('Get a state3').item.json.state }} W\n\nBilen har 52 kWh batteri (VW ID). Jag har också en Renault Zoe (52 kWh) utan uppkoppling.\nSka jag ladda nu eller vänta? Ge ett konkret råd.",
+        "options": {
+          "systemMessage": "Du är en energioptimerare för ett svenskt hem. Analysera datan och ge ett laddningsbeslut.\n\nSvara ENDAST med JSON i detta format, inget annat:\n{\n  \"action\": \"charge\" eller \"wait\",\n  \"reason\": \"kort motivering på svenska\",\n  \"recommended_amps\": 0-16\n}\n\nOm action är \"wait\", sätt recommended_amps till 0.\nOm action är \"charge\", välj ampere baserat på elpris och solproduktion.\nElpris under 1 kr/kWh = bra att ladda (16A).\nElpris 1-2 kr/kWh = ladda bara med solöverskott eller om SoC < 30%.\nElpris över 2 kr/kWh = vänta om möjligt."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        992,
+        0
+      ],
+      "id": "5b4ca7c9-affb-4e5a-8b29-e38815216c2f",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "resource": "service",
+        "operation": "call",
+        "domain": "persistent_notification",
+        "service": "create",
+        "serviceAttributes": {
+          "attributes": [
+            {
+              "name": "title",
+              "value": "🔌 AI Laddningsråd"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('AI Agent').item.json.output }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        0
+      ],
+      "id": "8d77e3f2-12fb-4d08-a1de-e43f2ffa38b0",
+      "name": "Call a service",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "kd7FvNd7hP2dnbMK",
+          "name": "Home Assistant account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get a state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a state": {
+      "main": [
+        [
+          {
+            "node": "Get a state1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a state1": {
+      "main": [
+        [
+          {
+            "node": "Get a state2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a state2": {
+      "main": [
+        [
+          {
+            "node": "Get a state3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a state3": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral Cloud Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Call a service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "c3989f8a-b81e-40cb-920a-cc368e52f7bf",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8efd1d037af3ba75b9db9851ae62e12fcbb7cdc4c993c57c6e6b9027fbea81ca"
+  },
+  "id": "lCA8KUWo1z477z3w",
+  "tags": []
+}
