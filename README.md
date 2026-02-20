@@ -149,15 +149,48 @@ ai-ev-charging/
 | Elpris | Beslut | Ampere |
 |--------|--------|--------|
 | < 1 kr/kWh | ✅ Ladda | 16A (max) |
-| 1–2 kr/kWh | ⚠️ Bara med sol eller låg SoC | 6–12A |
+| Under dagens genomsnitt | ✅ Ladda | 12–16A |
+| Nära dagens lägsta (inom 10 öre) | ✅ Ladda | 16A |
+| 1–2 kr/kWh (över snitt) | ⚠️ Bara med sol eller låg SoC | 6–12A |
 | > 2 kr/kWh | ❌ Vänta | 0A |
+
+> **Lärdom:** Statiska trösklar ("ladda under 1 kr") missar att 1.08 kr kan vara nattens billigaste pris. AI:n jämför därför mot dagens min/max/genomsnitt för smartare beslut.
 
 ## Roadmap
 
 - [x] **Fas 1:** Observer-läge – AI loggar beslut utan styrning
+- [x] **Fas 1b:** Google Sheets-loggning – AI vs HA jämförelse
 - [ ] **Fas 2:** Dynamisk ampere-styrning (6–16A baserat på sol/pris)
 - [ ] **Fas 3:** Mönsterigenkänning (körmönster, veckodagar, väder)
 - [ ] **Fas 4:** Helhemoptimering (belysning, uppvärmning, effekttoppar)
+
+## Besparingsanalys (Google Sheets)
+
+Systemet loggar automatiskt varje timmes data till Google Sheets för att jämföra AI:ns rekommendationer mot HA-automationens faktiska beslut.
+
+**Loggade datapunkter:**
+
+| Kolumn | Beskrivning |
+|--------|-------------|
+| Timestamp | Tidpunkt för analys |
+| Elpris | Aktuellt pris (kr/kWh) |
+| Pris_Min | Dagens lägsta pris |
+| Pris_Max | Dagens högsta pris |
+| Pris_Snitt | Dagens genomsnittspris |
+| SoC | Bilens batterinivå (%) |
+| Sol_W | Solproduktion (W) |
+| AI_Action | AI:ns rekommendation (charge/wait) |
+| AI_Amps | Rekommenderad laddström (0–16A) |
+| HA_Laddade | Laddboxens faktiska status |
+
+**Setup:**
+1. Skapa ett Google Sheet med headers enligt ovan
+2. Skapa en Service Account i Google Cloud Console
+3. Aktivera Google Sheets API + Google Drive API
+4. Dela sheetet med service accountens e-postadress
+5. Lägg till Google Sheets-noden i n8n-workflowet
+
+Datan kan sedan användas för att beräkna: *"Om AI:n hade styrt – hur mycket hade vi sparat jämfört med den vanliga automationen?"*
 
 ## Två-bilars-hantering
 
