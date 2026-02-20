@@ -122,9 +122,9 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Här är aktuell status för mitt hem:\n\nEasee laddbox: {{ $('Get a state').item.json.state }}\nBil batteri (SoC): {{ $('Get a state1').item.json.state }}%\nElpris just nu: {{ $('Get a state2').item.json.state }} kr/kWh\nSolproduktion: {{ $('Get a state3').item.json.state }} W\n\nBilen har 52 kWh batteri (VW ID). Jag har också en Renault Zoe (52 kWh) utan uppkoppling.\nSka jag ladda nu eller vänta? Ge ett konkret råd.",
+        "text": "=Här är aktuell status för mitt hem:\n\nEasee laddbox: {{ $('Get a state').item.json.state }}\nBil batteri (SoC): {{ $('Get a state1').item.json.state }}%\nElpris just nu: {{ $('Get a state2').item.json.state }} kr/kWh\nSolproduktion: {{ $('Get a state3').item.json.state }} W\n\nDagens lägsta elpris: {{ $('Get a state2').item.json.attributes.min }} kr/kWh\nDagens högsta elpris: {{ $('Get a state2').item.json.attributes.max }} kr/kWh\nGenomsnittspris idag: {{ $('Get a state2').item.json.attributes.average }} kr/kWh\n\nBilen har 52 kWh batteri (VW ID).\nSka jag ladda nu eller vänta? Ge ett konkret råd.",
         "options": {
-          "systemMessage": "Du är en energioptimerare för ett svenskt hem. Analysera datan och ge ett laddningsbeslut.\n\nSvara ENDAST med JSON i detta format, inget annat:\n{\n  \"action\": \"charge\" eller \"wait\",\n  \"reason\": \"kort motivering på svenska\",\n  \"recommended_amps\": 0-16\n}\n\nOm action är \"wait\", sätt recommended_amps till 0.\nOm action är \"charge\", välj ampere baserat på elpris och solproduktion.\nElpris under 1 kr/kWh = bra att ladda (16A).\nElpris 1-2 kr/kWh = ladda bara med solöverskott eller om SoC < 30%.\nElpris över 2 kr/kWh = vänta om möjligt."
+          "systemMessage": "Du är en energioptimerare för ett svenskt hem. Analysera datan och ge ett laddningsbeslut.\n\nSvara ENDAST med ren JSON, inget annat. Ingen markdown, inga backticks, ingen förklarande text.\n\nExakt detta format:\n{\"action\": \"charge\", \"reason\": \"kort motivering på svenska\", \"recommended_amps\": 16}\n\nRegler:\n- Om priset är under 1 kr/kWh = ladda alltid (16A)\n- Om priset är under dagens genomsnitt = ladda (12-16A)\n- Om priset är nära dagens lägsta (inom 10 öre) = ladda (16A)\n- Om priset är över 2 kr/kWh = vänta om möjligt\n- Om SoC < 30% = ladda oavsett pris\n- Svara ENDAST med ren JSON, ingen markdown, inga backticks"
         }
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -167,6 +167,151 @@
         "homeAssistantApi": {
           "id": "kd7FvNd7hP2dnbMK",
           "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1T6U5xuvItoQMv1Gs75G79U2rIQEcYhzUvOSkOcheSbs",
+          "mode": "list",
+          "cachedResultName": "AI EV Charging Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1T6U5xuvItoQMv1Gs75G79U2rIQEcYhzUvOSkOcheSbs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Blad1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1T6U5xuvItoQMv1Gs75G79U2rIQEcYhzUvOSkOcheSbs/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now.toISO() }}",
+            "Elpris": "={{ $('Get a state2').item.json.state }}",
+            "Pris_Min": "={{ $('Get a state2').item.json.attributes.min }}",
+            "Pris_Max": "={{ $('Get a state2').item.json.attributes.max }}",
+            "Pris_Snitt": "={{ $('Get a state2').item.json.attributes.average }}",
+            "SoC": "={{ $('Get a state1').item.json.state }}",
+            "Sol_W": "={{ $('Get a state3').item.json.state }}",
+            "AI_Action": "={{ JSON.parse($('AI Agent').item.json.output).action }}",
+            "AI_Amps": "={{ JSON.parse($('AI Agent').item.json.output).recommended_amps }}",
+            "HA_Laddade": "={{ $('Get a state').item.json.state }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Elpris",
+              "displayName": "Elpris",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Pris_Min",
+              "displayName": "Pris_Min",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Pris_Max",
+              "displayName": "Pris_Max",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Pris_Snitt",
+              "displayName": "Pris_Snitt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SoC",
+              "displayName": "SoC",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sol_W",
+              "displayName": "Sol_W",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Action",
+              "displayName": "AI_Action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Amps",
+              "displayName": "AI_Amps",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "HA_Laddade",
+              "displayName": "HA_Laddade",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1488,
+        0
+      ],
+      "id": "68969e32-7340-40a8-b08a-4d12e644de48",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleApi": {
+          "id": "q2vKSASwqmroEEOH",
+          "name": "Google Service Account account"
         }
       }
     }
@@ -249,6 +394,17 @@
           }
         ]
       ]
+    },
+    "Call a service": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -257,7 +413,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "c3989f8a-b81e-40cb-920a-cc368e52f7bf",
+  "versionId": "123b12c5-2cd8-4bec-b9b4-78a11d2e2205",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "8efd1d037af3ba75b9db9851ae62e12fcbb7cdc4c993c57c6e6b9027fbea81ca"
