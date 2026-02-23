@@ -11,12 +11,20 @@ Smart elbilsladdning med Home Assistant, n8n och AI – helt self-hosted.
 
 Ett system som optimerar elbilsladdning automatiskt genom att analysera:
 
-- **Elpris** (Nordpool) – laddar vid billigaste timmarna
+- **Elpris** (Tibber Pulse kvartspris / Nordpool timpris) – laddar vid billigaste tidpunkterna
+- **Prisranking** – jämför aktuellt pris mot dagens min/max/snitt/peak/off-peak
 - **Solproduktion** (SolarEdge) – utnyttjar egenproducerad el
 - **Bilens batterinivå** (SoC) – laddar bara vid behov
 - **Fasbelastning** – skyddar huvudsäkringen
 
-En AI-modell (Mistral) utvärderar all data varje timme och ger ett strukturerat laddningsbeslut.
+En AI-modell (Mistral) utvärderar all data var 15:e minut (kvartspris) eller varje timme (timpris) och ger ett strukturerat laddningsbeslut.
+
+### Två workflow-varianter
+
+| Variant | Priskälla | Intervall | Bäst för |
+|---------|-----------|-----------|----------|
+| **Tibber Pulse** | Kvartspris (realtid) | Var 15:e minut | Tibber-kunder med Pulse |
+| **Nordpool** | Timpris | Varje timme | Alla med Nordpool-integration |
 
 ## Arkitektur
 
@@ -27,7 +35,7 @@ En AI-modell (Mistral) utvärderar all data varje timme och ger ett strukturerat
 │  • ON/OFF-styrning av laddbox               │
 │  • Deadline, nödladdning, lastbalansering   │
 └──────────────────┬──────────────────────────┘
-                   │ data varje timme
+                   │ data var 15:e min (Tibber) / varje timme (Nordpool)
 ┌──────────────────▼──────────────────────────┐
 │  Lager 2: n8n + AI (OPTIMERING)             │
 │  • Analyserar elpris + SoC + sol            │
@@ -46,7 +54,8 @@ En AI-modell (Mistral) utvärderar all data varje timme och ger ett strukturerat
 | Laddbox | Easee A1 | Zaptec, Wallbox, Go-e |
 | Elbil | VW ID (MEB) | Tesla, Volvo, Hyundai/Kia |
 | Solpaneler | SolarEdge | Huawei, Fronius, Enphase |
-| Elpris | Nordpool SE3 | Tibber, Entso-e |
+| Elpris | Tibber Pulse (kvartspris) | Nordpool (timpris), Entso-e |
+| Elmätare | Tibber Pulse (P1) | HomeWizard, Slimmelezer |
 | Server | Proxmox (LXC) | Docker, Raspberry Pi |
 
 ## Snabbstart
@@ -66,8 +75,10 @@ Home Assistant → Profil → Security → Long-Lived Access Tokens → Create T
 ### 3. Importera n8n-workflow
 
 1. Öppna n8n (`http://<IP>:5678`)
-2. Importera `n8n-workflows/ev-smart-charging-observer.json`
-3. Uppdatera credentials (HA-token, Mistral API-nyckel)
+2. Importera **en** av:
+   - `n8n-workflows/EV Smart Charging - Tibber Pulse Quarter Price.json` (kvartspris, rekommenderat)
+   - `n8n-workflows/EV Smart Charging - AI Observer.json` (Nordpool timpris)
+3. Uppdatera credentials (HA-token, Mistral API-nyckel, Google Sheets service account)
 4. Uppdatera entity-IDs (se [Anpassning](#anpassning))
 
 ### 4. Importera HA-automationer
@@ -76,7 +87,7 @@ Kopiera filerna i `ha-automations/` till din HA `automations.yaml` eller importe
 
 ### 5. Aktivera
 
-Publish workflowet i n8n → det körs varje timme i observer-läge.
+Publish workflowet i n8n → det körs var 15:e minut (Tibber) eller varje timme (Nordpool) i observer-läge.
 
 ## Anpassning
 
@@ -125,9 +136,11 @@ ai-ev-charging/
 ├── README.md                          # Denna fil
 ├── LICENSE
 ├── docs/
-│   └── systemdokumentation.html       # Komplett systemdokumentation
+│   ├── systemdokumentation.html       # Komplett systemdokumentation
+│   └── analysrapport-feb2026.html     # Första analysrapporten (66 tim data)
 ├── n8n-workflows/
-│   └── ev-smart-charging-observer.json # n8n workflow (importerbar)
+│   ├── EV Smart Charging - AI Observer.json          # Nordpool (timpris)
+│   └── EV Smart Charging - Tibber Pulse Quarter Price.json  # Tibber (kvartspris)
 ├── ha-automations/
 │   ├── smart-charging.yaml            # Huvudautomation: smart laddning
 │   ├── load-protection-off.yaml       # Säkerhet: rädda huvudsäkringen
@@ -136,15 +149,21 @@ ai-ev-charging/
     └── entity-config.yaml             # Mall för entity-IDs
 ```
 
-## AI-beslut (exempel)
+## AI-beslut
 
-```json
-{
-  "action": "wait",
-  "reason": "Elpriset är över 1 kr/kWh och bilens batterinivå är över 30%. Vänta tills priset sjunker.",
-  "recommended_amps": 0
-}
-```
+### Tibber Pulse (kvartspris) – rekommenderat
+
+AI:n använder Tibbers `intraday_price_ranking` (0% = billigast, 100% = dyrast) för smartare beslut:
+
+| Prisranking | Beslut | Ampere |
+|-------------|--------|--------|
+| < 25% (billigaste kvarten) | ✅ Ladda alltid | 16A |
+| Under genomsnitt | ✅ Ladda | 12–16A |
+| > 75% (dyraste kvarten) | ⚠️ Vänta om SoC > 30% | 0A |
+| Över peak-nivå | ❌ Vänta om möjligt | 0A |
+| SoC < 30% | 🔴 Ladda oavsett pris | 16A |
+
+### Nordpool (timpris) – alternativ
 
 | Elpris | Beslut | Ampere |
 |--------|--------|--------|
@@ -156,17 +175,29 @@ ai-ev-charging/
 
 > **Lärdom:** Statiska trösklar ("ladda under 1 kr") missar att 1.08 kr kan vara nattens billigaste pris. AI:n jämför därför mot dagens min/max/genomsnitt för smartare beslut.
 
+### Exempel (Tibber Pulse)
+
+```json
+{
+  "action": "charge",
+  "reason": "Prisranking 12% – bland billigaste kvarten idag",
+  "recommended_amps": 16
+}
+```
+
 ## Roadmap
 
 - [x] **Fas 1:** Observer-läge – AI loggar beslut utan styrning
 - [x] **Fas 1b:** Google Sheets-loggning – AI vs HA jämförelse
+- [x] **Fas 1c:** Kvartsprisoptimering med Tibber Pulse (var 15:e min)
+- [x] **Fas 1d:** [Första analysrapporten](docs/analysrapport-feb2026.html) – 66 timmar data
 - [ ] **Fas 2:** Dynamisk ampere-styrning (6–16A baserat på sol/pris)
 - [ ] **Fas 3:** Mönsterigenkänning (körmönster, veckodagar, väder)
 - [ ] **Fas 4:** Helhemoptimering (belysning, uppvärmning, effekttoppar)
 
 ## Besparingsanalys (Google Sheets)
 
-Systemet loggar automatiskt varje timmes data till Google Sheets för att jämföra AI:ns rekommendationer mot HA-automationens faktiska beslut.
+Systemet loggar automatiskt varje kvarts data till Google Sheets för att jämföra AI:ns rekommendationer mot HA-automationens faktiska beslut.
 
 **Loggade datapunkter:**
 
@@ -192,8 +223,6 @@ Systemet loggar automatiskt varje timmes data till Google Sheets för att jämf�
 
 Datan kan sedan användas för att beräkna: *"Om AI:n hade styrt – hur mycket hade vi sparat jämfört med den vanliga automationen?"*
 
-📊 **[Se första analysrapporten (66 timmar data)](docs/analysrapport-feb2026.html)**
-
 ## Två-bilars-hantering
 
 Systemet hanterar två elbilar som delar en laddbox:
@@ -216,6 +245,7 @@ Pull requests välkomna! Särskilt intresserad av:
 - [n8n](https://n8n.io/) – Workflow-automation
 - [Mistral AI](https://mistral.ai/) – Europeisk AI-modell
 - [Easee](https://easee.com/) – Laddbox-integration
+- [Tibber](https://tibber.com/) – Kvartspris via Pulse
 - [Nordpool](https://github.com/custom-components/nordpool) – Elpris-integration
 - [Proxmox VE Helper Scripts](https://community-scripts.github.io/ProxmoxVE/) – n8n LXC-installation
 
