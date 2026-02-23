@@ -192,6 +192,8 @@ Systemet loggar automatiskt varje timmes data till Google Sheets för att jämf�
 
 Datan kan sedan användas för att beräkna: *"Om AI:n hade styrt – hur mycket hade vi sparat jämfört med den vanliga automationen?"*
 
+📊 **[Se första analysrapporten (66 timmar data)](docs/analysrapport-feb2026.html)**
+
 ## Två-bilars-hantering
 
 Systemet hanterar två elbilar som delar en laddbox:
