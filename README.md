@@ -158,10 +158,12 @@ AI:n använder Tibbers `intraday_price_ranking` (0% = billigast, 100% = dyrast) 
 | Prisranking | Beslut | Ampere |
 |-------------|--------|--------|
 | < 25% (billigaste kvarten) | ✅ Ladda alltid | 16A |
-| Under genomsnitt | ✅ Ladda | 12–16A |
-| > 75% (dyraste kvarten) | ⚠️ Vänta om SoC > 30% | 0A |
-| Över peak-nivå | ❌ Vänta om möjligt | 0A |
+| 25–50% | ✅ Ladda | 12–16A |
+| 50–75% (mittzon) | ⚠️ Ladda med låg ström om SoC < 40%, annars vänta | 8A |
+| > 75% (dyraste kvarten) | ❌ Vänta om SoC > 30% | 0A |
 | SoC < 30% | 🔴 Ladda oavsett pris | 16A |
+
+> **Anti-flipflop:** I mittzonen (40–60% ranking) väljer AI:n alltid "charge" med lägre ampere (8A) istället för att växla mellan charge/wait varannan kvart. Mjuk övergång istället för hård brytpunkt.
 
 ### Nordpool (timpris) – alternativ
 
@@ -191,13 +193,27 @@ AI:n använder Tibbers `intraday_price_ranking` (0% = billigast, 100% = dyrast) 
 - [x] **Fas 1b:** Google Sheets-loggning – AI vs HA jämförelse
 - [x] **Fas 1c:** Kvartsprisoptimering med Tibber Pulse (var 15:e min)
 - [x] **Fas 1d:** [Första analysrapporten](docs/analysrapport-feb2026.html) – 66 timmar data
+- [x] **Fas 1e:** Anti-flipflop: mittzon-regler och stabilare beslut
+- [x] **Fas 1f:** Datakvalitetsfix: prisformat i Google Sheets
 - [ ] **Fas 2:** Dynamisk ampere-styrning (6–16A baserat på sol/pris)
 - [ ] **Fas 3:** Mönsterigenkänning (körmönster, veckodagar, väder)
 - [ ] **Fas 4:** Helhemoptimering (belysning, uppvärmning, effekttoppar)
 
-## Besparingsanalys (Google Sheets)
+## Besparingsanalys
 
-Systemet loggar automatiskt varje kvarts data till Google Sheets för att jämföra AI:ns rekommendationer mot HA-automationens faktiska beslut.
+### Resultat: 5 dagars data (20–25 feb 2026)
+
+| Scenario | Snittpris | Kostnad (48 kWh) |
+|----------|-----------|------------------|
+| **HA-automation (faktiskt)** | 1.11 kr/kWh | 53 kr |
+| **AI optimal (hade kunnat)** | 0.54 kr/kWh | 26 kr |
+| **Besparing** | **0.57 kr/kWh** | **27 kr (51%)** |
+
+Extrapolerat: **~165 kr/mån** i besparing. Största vinsten: AI:n hade laddat kvällen 21 feb vid 0.44–0.58 kr istället för kvällen 22 feb vid 1.06–1.13 kr.
+
+### Google Sheets-loggning
+
+Systemet loggar automatiskt var 15:e minut till Google Sheets för att jämföra AI:ns rekommendationer mot HA-automationens faktiska beslut.
 
 **Loggade datapunkter:**
 
@@ -230,6 +246,15 @@ Systemet hanterar två elbilar som delar en laddbox:
 - **Uppkopplad bil** (t.ex. VW ID): SoC läses direkt via API
 - **Ej uppkopplad bil** (t.ex. Renault Zoe): SoC anges manuellt via `input_number` i HA
 - **Identifiering:** Om VW:ns kabel inte är ansluten och laddboxen visar "awaiting_start" → det är Zoe
+
+## Lärdomar
+
+| Problem | Lösning |
+|---------|---------|
+| Statiska priströsklar ("ladda under 1 kr") missar relativt billiga timmar | Använd `intraday_price_ranking` istället för absoluta priser |
+| AI flippar charge/wait varannan kvart vid gränsvärden | Mittzon-regel: 40–60% ranking → charge med lägre ampere (8A) |
+| Google Sheets tolkar `=0.988` som formel | Wrappa med `'' +` i n8n för ren strängoutput |
+| Bilen disconnected ~75% av tiden | Rutin: koppla in bilen varje kväll, AI:n väljer bästa laddtillfälle |
 
 ## Bidra
 
