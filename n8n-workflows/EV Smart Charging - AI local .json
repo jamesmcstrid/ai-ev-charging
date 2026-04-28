@@ -1,0 +1,605 @@
+{
+  "name": "EV Smart Charging - AI Observer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -624,
+        -672
+      ],
+      "id": "4f21fe2c-38d8-4516-b689-bfe35a237021",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Du är husets Energi-Master. Ditt uppdrag är att styra både elbilsladdningen och poolvärmen smart och effektivt.\nHuvudregeln är att ALDRIG överbelasta husets huvudsäkring!\n\nDATA JUST NU:\n- Husets grundförbrukning: {{ $('Husets förbrukning just nu').item.json.state }} W\n- Solproduktion: {{ $('Solceller').item.json.state }} W\n- Solöverskott (Sol minus Förbrukning): {{ $('Solceller').item.json.state - $('Husets förbrukning just nu').item.json.state }} W\n- Elpris: {{ $('Elpris').item.json.state }} kr/kWh\n- Bilens SoC: {{ $('Batteri status BUZZ').item.json.state }}%\n- Kabel i bilen: {{ $('Är kablen till bilarna i?').item.json.state }}\n- MANUELL KNAPP TVINGA POOL: {{ $json.state }}\n- MANUELL KNAPP TVINGA BIL: {{ $('Tvinga Elbilsladdning').item.json.state }}\n\n--- MANUELL ÖVERSTYRNING (CHEFENS ORDER) ---\n1. Om \"MANUELL KNAPP TVINGA POOL\" är \"on\", MÅSTE \"pool_action\" vara \"on\". Pris och sol ignoreras.\n2. Om \"MANUELL KNAPP TVINGA BIL\" är \"on\" OCH \"Kabel i bilen\" inte är disconnected, MÅSTE \"ev_action\" vara \"charge\" och \"ev_amps\" sättas högt (ex 16A). Pris och sol ignoreras.\n\n--- REGLER FÖR ELBILEN (Om ej manuellt överstyrd) ---\n1. KRITISK KONTROLL: Om \"Kabel i bilen\" är \"disconnected\", en tom sträng eller okänd, MÅSTE \"ev_action\" sättas till \"wait\" och \"ev_amps\" till 0.\n2. SMART LADDNING (Ignorera batteriprocent): Om \"Kabel i bilen\" visar \"awaiting_start\", \"connected\", eller \"charging\", betyder det att bilen vill ha ström. \n- Sätt \"ev_action\" till \"charge\" OM elpriset är lågt/rimligt ELLER om det finns solöverskott.\n- Sätt \"ev_action\" till \"wait\" om elpriset är högt och inget solöverskott finns (spara laddningen till natten).\n3. ZOE-STRÖMKRAV (VIKTIGT): När du beslutar att ladda (\"charge\"), kräver bilen MINST 8A. Om husets totala budget är för tight för att ge minst 8A, MÅSTE du sätta \"ev_action\" till \"wait\". Bilen har dock prioritet över poolen, så stäng av poolen först om det krävs för att ge bilen minst 8A.\n\n--- REGLER FÖR POOLEN (Om ej manuellt överstyrd) ---\n1. Poolen är en lyx/värmebuffert. \n2. Sätt \"pool_action\" till \"on\" primärt om Solöverskottet är större än 0 W, ELLER om elpriset är under 0.30 kr. I övriga fall, sätt till \"off\".\n\n--- ÖVERGRIPANDE SÄKERHET ---\n1. Om husets totala förbrukning är kritiskt hög i förhållande till huvudsäkringen, och ingen manuell överstyrning tvingar driften: sänk först bilens Amps (ev_amps) och stäng sedan av poolen helt (\"pool_action\": \"off\").\n\nSVARA ENDAST MED ETT JSON-OBJEKT I EXAKT DETTA FORMAT (inga backticks, ingen markdown):\n{\n  \"ev_action\": \"charge\" eller \"wait\",\n  \"ev_amps\": siffran 8 till 16 (eller 0 om wait),\n  \"pool_action\": \"on\" eller \"off\",\n  \"reason\": \"Kort motivering till varför.\"\n}",
+        "options": {
+          "systemMessage": ""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1168,
+        -672
+      ],
+      "id": "38b3e3ec-45d7-4cd2-9052-f2e1e664b4d4",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "model": "gemma4:e4b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1248,
+        -448
+      ],
+      "id": "1284dd93-1dba-48ba-9846-d7349283277d",
+      "name": "Ollama Chat Model2",
+      "credentials": {
+        "ollamaApi": {
+          "id": "r5JmudXdiYsfNNJ6",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7662c90c-60c8-479e-b98a-78484803923a",
+                    "leftValue": "={{ $json.ev_action }}",
+                    "rightValue": "charge",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains",
+                      "name": "filter.operator.contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e4f8a846-9a2e-4b6b-87b6-c73e09886a12",
+                    "leftValue": "={{ $json.ev_action }}",
+                    "rightValue": "wait",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains",
+                      "name": "filter.operator.contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2263be43-98d4-43ba-b062-b1fae090dae0",
+      "name": "Ladda eller Vänta?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1744,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.solaredge_aktuell_effekt"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        -672
+      ],
+      "id": "4b5e4164-0882-4cac-b941-4ef90f3eebbe",
+      "name": "Solceller",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.a1_status"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        -672
+      ],
+      "id": "64ce85f4-ff53-4913-b565-801d17731751",
+      "name": "Är kablen till bilarna i?",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.nordpool_kwh_se3_sek_2_10_025"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        48,
+        -672
+      ],
+      "id": "5e56e7e6-6720-4b48-bce8-d51172e4ab2b",
+      "name": "Elpris",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.wv2zzzeb9rh001501_charging_time_left"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        272,
+        -672
+      ],
+      "id": "1f7d3e41-3ba9-44b5-8a3c-f733a029834c",
+      "name": "Batteri status BUZZ",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vi hämtar texten från AI-agentens \"output\"\nconst raw = $input.all()[0].json.output;\n\n// Vi letar efter JSON-mönstret { ... }\nconst jsonMatch = raw.match(/\\{.*\\}/s);\n\nif (jsonMatch) {\n  // Om vi hittar det, gör vi om texten till ett objekt\n  return JSON.parse(jsonMatch[0]);\n}\n\n// Om ingen JSON hittas, skicka ett säkert stopp-svar\nreturn { \n  action: \"wait\", \n  recommended_amps: 0, \n  reason: \"Kunde inte hitta JSON i AI-svaret\" \n};"
+      },
+      "id": "5303ee4d-31d7-4f41-9c64-b9873581c059",
+      "name": "Laddare PÅ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        -672
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "operation": "upsert",
+        "entityId": "binary_sensor.a1_laddning",
+        "state": "off"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        -384
+      ],
+      "id": "93e981c0-7f16-43fe-ad20-cc74ebfcc244",
+      "name": "Laddare OFF",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "operation": "upsert",
+        "entityId": "binary_sensor.a1_laddning",
+        "state": "on"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        -576
+      ],
+      "id": "19ee5125-590a-4de5-873a-bc6460685cec",
+      "name": "Laddare ON",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.pool_action }}",
+              "value2": "on"
+            }
+          ]
+        }
+      },
+      "id": "2f68eee4-393f-40d4-8a9e-dcf37d10fe71",
+      "name": "ON eller OFF?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        -864
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "operation": "upsert",
+        "entityId": "switch.poolvarme_ovrigt_2",
+        "state": "on"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        -960
+      ],
+      "id": "bf6f63c9-9dd1-4e02-93b3-74a39fc92098",
+      "name": "POOL ON",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "operation": "upsert",
+        "entityId": "switch.poolvarme_ovrigt_2",
+        "state": "off"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        -768
+      ],
+      "id": "359efce4-4ead-4fd6-8da6-6e3b7f2f7fa0",
+      "name": "POOL OFF",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "service",
+        "operation": "call",
+        "domain": "input_text",
+        "service": "=set_value",
+        "serviceAttributes": {
+          "attributes": [
+            {
+              "name": "=entity_id",
+              "value": "input_text.ai_energi_master"
+            },
+            {
+              "name": "value",
+              "value": "=Pool: {{ $json.pool_action }} | Bil: {{ $json.ev_action }} ({{ $json.ev_amps }}A). Motivering: {{ $json.reason }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        -672
+      ],
+      "id": "c59f4be7-cb74-4067-bf42-d13ec92d4059",
+      "name": "Call a service",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "input_boolean.tvinga_billaddning"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        720,
+        -672
+      ],
+      "id": "c45af949-9e84-4850-8b1f-1b9a50d1db0d",
+      "name": "Tvinga Elbilsladdning",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "input_boolean.tvinga_poolvarme"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        944,
+        -672
+      ],
+      "id": "4b034574-eb9d-42a9-8a51-461e50beab3f",
+      "name": "Tvinga POOLvärme",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "state",
+        "entityId": "sensor.tibber_pulse_solhojdsvagen_30_b_effekt"
+      },
+      "type": "n8n-nodes-base.homeAssistant",
+      "typeVersion": 1,
+      "position": [
+        496,
+        -672
+      ],
+      "id": "f2543a32-6a01-46c3-b96a-b6a7768f1a30",
+      "name": "Husets förbrukning just nu",
+      "credentials": {
+        "homeAssistantApi": {
+          "id": "7y4n7Rad0evhSpYD",
+          "name": "Home Assistant account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Är kablen till bilarna i?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Laddare PÅ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ladda eller Vänta?": {
+      "main": [
+        [
+          {
+            "node": "Laddare ON",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Laddare OFF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Är kablen till bilarna i?": {
+      "main": [
+        [
+          {
+            "node": "Solceller",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Elpris": {
+      "main": [
+        [
+          {
+            "node": "Batteri status BUZZ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solceller": {
+      "main": [
+        [
+          {
+            "node": "Elpris",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batteri status BUZZ": {
+      "main": [
+        [
+          {
+            "node": "Husets förbrukning just nu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Laddare PÅ": {
+      "main": [
+        [
+          {
+            "node": "Ladda eller Vänta?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "ON eller OFF?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Call a service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ON eller OFF?": {
+      "main": [
+        [
+          {
+            "node": "POOL ON",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "POOL OFF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tvinga Elbilsladdning": {
+      "main": [
+        [
+          {
+            "node": "Tvinga POOLvärme",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tvinga POOLvärme": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Husets förbrukning just nu": {
+      "main": [
+        [
+          {
+            "node": "Tvinga Elbilsladdning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "3ca3a80e-54bd-4d29-882d-a755ea94c299",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9c1778ac2416ad58880539532e6478d6336f6d8c37d8e1c718a14ad973aea190"
+  },
+  "id": "lCA8KUWo1z477z3w",
+  "tags": []
+}
