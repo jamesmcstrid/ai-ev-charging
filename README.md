@@ -1,9 +1,3 @@
-Det där ser ut som en klassisk "Markdown-krash"! GitHubs README-filer kan vara lite griniga när man klistrar in råa instruktioner och n8n-kod direkt. Det blir lätt en enda lång vägg av text.
-
-Låt oss göra om det så att det ser riktigt proffsigt ut – som ett "riktigt" open source-projekt. Jag har skrivit om hela README-texten åt dig här nedanför. Den är strukturerad med snygga rubriker, tydliga listor och kod-block som faktiskt fungerar i GitHub.
-
-**Gör så här:** Klicka på "Edit" (pennan) på din `README.md` på GitHub, radera allt och klistra in detta istället:
-
 ***
 
 ```markdown
