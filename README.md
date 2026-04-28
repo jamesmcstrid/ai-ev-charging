@@ -1,65 +1,94 @@
-AI-Driven EV Charging & Pool Optimization (v2.0)
-Denna uppdatering av repot (tidigare baserat på Mistral) är nu helt fokuserad på lokala LLM-modeller (Qwen2.5-Coder) för att agera som "Energy Master". Den hanterar dynamiskt elbilsladdning och poolvärme baserat på elpris, solöverskott och husets huvudsäkring.
-🚀 Nyheter i Version 2.0 (The Energy Master Update)
-Samlad AI-Hjärna: Bilen och poolen styrs nu av en och samma AI-nod för att förhindra att huvudsäkringen går (Total Power Budgeting).
-KISS-Principen för Elbilar ("The Zoe Fix"): Inget mer krångel med att hämta SoC%. Om kabeln är i (`awaiting_start`), antar systemet att bilen ska ha ström. Bilen måste också få minst 8A för att ladda, annars pausas den automatiskt.
-Boss Mode (Manuell Överstyrning): Fysiska Home Assistant-knappar kan tvinga systemet att starta poolen eller bilen. AI:n justerar då den andra enheten för att rädda säkringen.
-Smart Loggning: AI:ns beslutsprocess skickas direkt till en Home Assistant-hjälpare (`input_text`) för realtidsloggning på din dashboard.
-🛠 Förutsättningar
-System
-Beskrivning
-Home Assistant
-Ditt primära smarta hem-nav. Behöver sensorer för Totalförbrukning, Solproduktion, Elpris och Bilstauts.
-n8n
-Automationsmotorn. Hämtar in data från HA, frågar AI:n och pushar tillbaka resultatet.
-Ollama
-Körs lokalt (t.ex. med Qwen2.5-Coder 7b) och är inkopplad i n8n via LangChain-noder.
+Det där ser ut som en klassisk "Markdown-krash"! GitHubs README-filer kan vara lite griniga när man klistrar in råa instruktioner och n8n-kod direkt. Det blir lätt en enda lång vägg av text.
 
-📝 The Master Prompt (För din n8n AI Agent)
-Kopiera detta och klistra in i din Chat Model Prompt i n8n.
+Låt oss göra om det så att det ser riktigt proffsigt ut – som ett "riktigt" open source-projekt. Jag har skrivit om hela README-texten åt dig här nedanför. Den är strukturerad med snygga rubriker, tydliga listor och kod-block som faktiskt fungerar i GitHub.
+
+**Gör så här:** Klicka på "Edit" (pennan) på din `README.md` på GitHub, radera allt och klistra in detta istället:
+
+***
+
+```markdown
+# AI Energy Master v2.0 ⚡🤖
+
+An advanced local AI orchestration system for Home Assistant. This project uses n8n and local LLMs (like Qwen2.5-Coder) to intelligently manage high-load appliances—specifically EV charging and pool heating—while protecting your main circuit breaker.
+
+## 🌟 Key Features in v2.0
+
+*   **🧠 Intelligent Power Budgeting:** Merges multiple high-load devices into one AI brain to prevent overloading the house.
+*   **🔌 "The Zoe Fix" (KISS Principle):** Simplifies EV charging. If the cable is plugged in (`awaiting_start`), the AI understands it's time to charge. No complex SoC tracking required for non-connected cars like Renault Zoe.
+*   **☀️ Solar-Aware Logic:** Automatically calculates solar surplus and prioritizes green energy.
+*   **🕹️ Manual Overrides:** Integration with Home Assistant "Helpers" (Toggles) allowing the user to force-start devices. The AI automatically adjusts other loads to compensate.
+*   **📝 Reasoning Logs:** The AI explains *why* it made a decision, sending the reasoning directly to a text sensor on your Home Assistant dashboard.
+*   **🛡️ Safety First:** Hardcoded limits (e.g., min 8A for Zoe) to ensure charger stability and fuse protection.
+
+---
+
+## 🛠️ Setup Guide
+
+### 1. Home Assistant Helpers
+Create the following helpers in Home Assistant (**Settings -> Devices & Services -> Helpers**):
+
+| Name | Type | Entity ID |
+| :--- | :--- | :--- |
+| **Tvinga Poolvärme** | Toggle | `input_boolean.tvinga_poolvarme` |
+| **Tvinga Billaddning** | Toggle | `input_boolean.tvinga_billaddning` |
+| **AI Energi Master** | Text | `input_text.ai_energi_master` |
+
+### 2. n8n Workflow
+1. Download the `.json` workflow from the `n8n-workflows/` folder in this repo.
+2. Import it into your n8n instance.
+3. Ensure your Home Assistant credentials are set up correctly.
+
+### 3. The Master Prompt
+Copy and paste the following prompt into your **AI Agent** node in n8n. This is the brain of the system.
+
+```text
 Du är husets Energi-Master. Ditt uppdrag är att styra både elbilsladdningen och poolvärmen smart och effektivt.
 Huvudregeln är att ALDRIG överbelasta husets huvudsäkring!
 
 DATA JUST NU:
-- Husets grundförbrukning: {{ $('Get a state1').item.json.state }} W
+- Husets grundförbrukning: {{ $json.state }} W
 - Solproduktion: {{ $('Solceller').item.json.state }} W
-- Solöverskott (Sol minus Förbrukning): {{ $('Solceller').item.json.state - $('Get a state1').item.json.state }} W
+- Solöverskott: {{ $('Solceller').item.json.state - $json.state }} W
 - Elpris: {{ $('Elpris').item.json.state }} kr/kWh
 - Kabel i bilen: {{ $('Är kablen till bilarna i?').item.json.state }}
 - MANUELL KNAPP TVINGA POOL: {{ $('Tvinga Pool').item.json.state }}
 - MANUELL KNAPP TVINGA BIL: {{ $('Tvinga Bil').item.json.state }}
 
---- MANUELL ÖVERSTYRNING (CHEFENS ORDER) ---
-1. Om "MANUELL KNAPP TVINGA POOL" är "on", MÅSTE "pool_action" vara "on". Pris och sol ignoreras.
-2. Om "MANUELL KNAPP TVINGA BIL" är "on" OCH "Kabel i bilen" inte är disconnected, MÅSTE "ev_action" vara "charge" och "ev_amps" sättas högt (ex 16A). Pris och sol ignoreras.
+--- MANUELL ÖVERSTYRNING ---
+1. Om "MANUELL KNAPP TVINGA POOL" är "on", MÅSTE "pool_action" vara "on".
+2. Om "MANUELL KNAPP TVINGA BIL" är "on" OCH kabeln är i, MÅSTE "ev_action" vara "charge" (16A).
 
---- REGLER FÖR ELBILEN (Om ej manuellt överstyrd) ---
-1. KRITISK KONTROLL: Om "Kabel i bilen" är "disconnected", en tom sträng eller okänd, MÅSTE "ev_action" sättas till "wait" och "ev_amps" till 0.
-2. SMART LADDNING (Ignorera batteriprocent): Om "Kabel i bilen" visar "awaiting_start", "connected", eller "charging", betyder det att bilen vill ha ström. 
-- Sätt "ev_action" till "charge" OM elpriset är lågt/rimligt ELLER om det finns solöverskott.
-- Sätt "ev_action" till "wait" om elpriset är högt och inget solöverskott finns (spara laddningen till natten).
-3. ZOE-STRÖMKRAV (VIKTIGT): När du beslutar att ladda ("charge"), kräver bilen MINST 8A. Om husets totala budget är för tight för att ge minst 8A, MÅSTE du sätta "ev_action" till "wait". Bilen har dock prioritet över poolen, så stäng av poolen först om det krävs för att ge bilen minst 8A.
+--- REGLER FÖR ELBILEN ---
+1. Om kabeln är "disconnected", sätt "ev_action" till "wait".
+2. Om kabeln är i ("awaiting_start"/"connected"), ladda om priset är lågt eller solöverskott finns.
+3. VIKTIGT: Sätt aldrig "ev_amps" under 8A (Zoe-krav). Prioritera bilen över poolen vid behov.
 
---- REGLER FÖR POOLEN (Om ej manuellt överstyrd) ---
-1. Poolen är en lyx/värmebuffert. 
-2. Sätt "pool_action" till "on" primärt om Solöverskottet är större än 0 W, ELLER om elpriset är under 0.30 kr. I övriga fall, sätt till "off".
+--- REGLER FÖR POOLEN ---
+1. Kör poolen primärt vid solöverskott eller elpris under 0.30 kr.
 
---- ÖVERGRIPANDE SÄKERHET ---
-1. Om husets totala förbrukning är kritiskt hög i förhållande till huvudsäkringen, och ingen manuell överstyrning tvingar driften: sänk först bilens Amps (ev_amps) och stäng sedan av poolen helt ("pool_action": "off").
-
-SVARA ENDAST MED ETT JSON-OBJEKT I EXAKT DETTA FORMAT (inga backticks, ingen markdown):
+SVARA ENDAST MED JSON:
 {
-  "ev_action": "charge" eller "wait",
-  "ev_amps": siffran 8 till 16 (eller 0 om wait),
-  "pool_action": "on" eller "off",
-  "reason": "Kort motivering till varför."
+  "ev_action": "charge/wait",
+  "ev_amps": 8-16,
+  "pool_action": "on/off",
+  "reason": "Kort motivering."
 }
+```
 
+---
 
-⚙️ Home Assistant Hjälpare (Helpers)
-För att bygga den fulla upplevelsen, lägg till dessa under Inställningar -> Hjälpare:
-input_boolean.tvinga_poolvarme - Switch för manuell styrning.
-input_boolean.tvinga_billaddning - Switch för manuell styrning av EV.
-input_text.ai_energi_master - Textfält som AI:n skriver sin status till.
+## 📺 Dashboard Example
+Add a Markdown card to your dashboard to see the AI's thoughts in real-time:
 
-N8N JSON Import: Kom ihåg att ladda ner ditt flöde från n8n som en `.json`-fil och lägga i `n8n-workflows/`-mappen i ditt repo, så att besökare enkelt kan importera hela grafen.
+```yaml
+type: markdown
+content: >
+  ## 🤖 AI Energy Status
+  **Current Decision:** {{ states('input_text.ai_energi_master') }}
+```
+
+## 📄 License
+MIT
+```
+
+***
