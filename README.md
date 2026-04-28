@@ -1,279 +1,65 @@
-# ⚡🤖 AI-Driven EV Charging Optimization
+AI-Driven EV Charging & Pool Optimization (v2.0)
+Denna uppdatering av repot (tidigare baserat på Mistral) är nu helt fokuserad på lokala LLM-modeller (Qwen2.5-Coder) för att agera som "Energy Master". Den hanterar dynamiskt elbilsladdning och poolvärme baserat på elpris, solöverskott och husets huvudsäkring.
+🚀 Nyheter i Version 2.0 (The Energy Master Update)
+Samlad AI-Hjärna: Bilen och poolen styrs nu av en och samma AI-nod för att förhindra att huvudsäkringen går (Total Power Budgeting).
+KISS-Principen för Elbilar ("The Zoe Fix"): Inget mer krångel med att hämta SoC%. Om kabeln är i (`awaiting_start`), antar systemet att bilen ska ha ström. Bilen måste också få minst 8A för att ladda, annars pausas den automatiskt.
+Boss Mode (Manuell Överstyrning): Fysiska Home Assistant-knappar kan tvinga systemet att starta poolen eller bilen. AI:n justerar då den andra enheten för att rädda säkringen.
+Smart Loggning: AI:ns beslutsprocess skickas direkt till en Home Assistant-hjälpare (`input_text`) för realtidsloggning på din dashboard.
+🛠 Förutsättningar
+System
+Beskrivning
+Home Assistant
+Ditt primära smarta hem-nav. Behöver sensorer för Totalförbrukning, Solproduktion, Elpris och Bilstauts.
+n8n
+Automationsmotorn. Hämtar in data från HA, frågar AI:n och pushar tillbaka resultatet.
+Ollama
+Körs lokalt (t.ex. med Qwen2.5-Coder 7b) och är inkopplad i n8n via LangChain-noder.
 
-Smart elbilsladdning med Home Assistant, n8n och AI – helt self-hosted.
+📝 The Master Prompt (För din n8n AI Agent)
+Kopiera detta och klistra in i din Chat Model Prompt i n8n.
+Du är husets Energi-Master. Ditt uppdrag är att styra både elbilsladdningen och poolvärmen smart och effektivt.
+Huvudregeln är att ALDRIG överbelasta husets huvudsäkring!
 
-![Status](https://img.shields.io/badge/Status-Observer_Mode-blue)
-![HA](https://img.shields.io/badge/Home_Assistant-2024.x+-41BDF5?logo=homeassistant)
-![n8n](https://img.shields.io/badge/n8n-Self_Hosted-FF6D5A?logo=n8n)
-![License](https://img.shields.io/badge/License-MIT-green)
+DATA JUST NU:
+- Husets grundförbrukning: {{ $('Get a state1').item.json.state }} W
+- Solproduktion: {{ $('Solceller').item.json.state }} W
+- Solöverskott (Sol minus Förbrukning): {{ $('Solceller').item.json.state - $('Get a state1').item.json.state }} W
+- Elpris: {{ $('Elpris').item.json.state }} kr/kWh
+- Kabel i bilen: {{ $('Är kablen till bilarna i?').item.json.state }}
+- MANUELL KNAPP TVINGA POOL: {{ $('Tvinga Pool').item.json.state }}
+- MANUELL KNAPP TVINGA BIL: {{ $('Tvinga Bil').item.json.state }}
 
-## Vad är detta?
+--- MANUELL ÖVERSTYRNING (CHEFENS ORDER) ---
+1. Om "MANUELL KNAPP TVINGA POOL" är "on", MÅSTE "pool_action" vara "on". Pris och sol ignoreras.
+2. Om "MANUELL KNAPP TVINGA BIL" är "on" OCH "Kabel i bilen" inte är disconnected, MÅSTE "ev_action" vara "charge" och "ev_amps" sättas högt (ex 16A). Pris och sol ignoreras.
 
-Ett system som optimerar elbilsladdning automatiskt genom att analysera:
+--- REGLER FÖR ELBILEN (Om ej manuellt överstyrd) ---
+1. KRITISK KONTROLL: Om "Kabel i bilen" är "disconnected", en tom sträng eller okänd, MÅSTE "ev_action" sättas till "wait" och "ev_amps" till 0.
+2. SMART LADDNING (Ignorera batteriprocent): Om "Kabel i bilen" visar "awaiting_start", "connected", eller "charging", betyder det att bilen vill ha ström. 
+- Sätt "ev_action" till "charge" OM elpriset är lågt/rimligt ELLER om det finns solöverskott.
+- Sätt "ev_action" till "wait" om elpriset är högt och inget solöverskott finns (spara laddningen till natten).
+3. ZOE-STRÖMKRAV (VIKTIGT): När du beslutar att ladda ("charge"), kräver bilen MINST 8A. Om husets totala budget är för tight för att ge minst 8A, MÅSTE du sätta "ev_action" till "wait". Bilen har dock prioritet över poolen, så stäng av poolen först om det krävs för att ge bilen minst 8A.
 
-- **Elpris** (Tibber Pulse kvartspris / Nordpool timpris) – laddar vid billigaste tidpunkterna
-- **Prisranking** – jämför aktuellt pris mot dagens min/max/snitt/peak/off-peak
-- **Solproduktion** (SolarEdge) – utnyttjar egenproducerad el
-- **Bilens batterinivå** (SoC) – laddar bara vid behov
-- **Fasbelastning** – skyddar huvudsäkringen
+--- REGLER FÖR POOLEN (Om ej manuellt överstyrd) ---
+1. Poolen är en lyx/värmebuffert. 
+2. Sätt "pool_action" till "on" primärt om Solöverskottet är större än 0 W, ELLER om elpriset är under 0.30 kr. I övriga fall, sätt till "off".
 
-En AI-modell (Mistral) utvärderar all data var 15:e minut (kvartspris) eller varje timme (timpris) och ger ett strukturerat laddningsbeslut.
+--- ÖVERGRIPANDE SÄKERHET ---
+1. Om husets totala förbrukning är kritiskt hög i förhållande till huvudsäkringen, och ingen manuell överstyrning tvingar driften: sänk först bilens Amps (ev_amps) och stäng sedan av poolen helt ("pool_action": "off").
 
-### Två workflow-varianter
-
-| Variant | Priskälla | Intervall | Bäst för |
-|---------|-----------|-----------|----------|
-| **Tibber Pulse** | Kvartspris (realtid) | Var 15:e minut | Tibber-kunder med Pulse |
-| **Nordpool** | Timpris | Varje timme | Alla med Nordpool-integration |
-
-## Arkitektur
-
-```
-┌─────────────────────────────────────────────┐
-│  Lager 1: HA-automation (SÄKERHETSNÄT)      │
-│  • Alltid aktivt                            │
-│  • ON/OFF-styrning av laddbox               │
-│  • Deadline, nödladdning, lastbalansering   │
-└──────────────────┬──────────────────────────┘
-                   │ data var 15:e min (Tibber) / varje timme (Nordpool)
-┌──────────────────▼──────────────────────────┐
-│  Lager 2: n8n + AI (OPTIMERING)             │
-│  • Analyserar elpris + SoC + sol            │
-│  • Mistral AI ger laddningsbeslut (JSON)    │
-│  • Notifierar i HA (observer-läge)          │
-│  • Framtid: dynamisk ampere-styrning        │
-└─────────────────────────────────────────────┘
-```
-
-> **Nyckelprincip:** Om AI:n eller n8n ligger nere fungerar Lager 1 som innan. Bilen laddas alltid vid behov.
-
-## Hårdvarukrav
-
-| Komponent | Testad med | Alternativ |
-|-----------|-----------|------------|
-| Laddbox | Easee A1 | Zaptec, Wallbox, Go-e |
-| Elbil | VW ID (MEB) | Tesla, Volvo, Hyundai/Kia |
-| Solpaneler | SolarEdge | Huawei, Fronius, Enphase |
-| Elpris | Tibber Pulse (kvartspris) | Nordpool (timpris), Entso-e |
-| Elmätare | Tibber Pulse (P1) | HomeWizard, Slimmelezer |
-| Server | Proxmox (LXC) | Docker, Raspberry Pi |
-
-## Snabbstart
-
-### 1. Installera n8n på Proxmox
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/n8n.sh)"
-```
-
-Rekommenderade resurser: 2 GB RAM, 2 CPU-kärnor, 8 GB disk.
-
-### 2. Skapa HA Access Token
-
-Home Assistant → Profil → Security → Long-Lived Access Tokens → Create Token
-
-### 3. Importera n8n-workflow
-
-1. Öppna n8n (`http://<IP>:5678`)
-2. Importera **en** av:
-   - `n8n-workflows/EV Smart Charging - Tibber Pulse Quarter Price.json` (kvartspris, rekommenderat)
-   - `n8n-workflows/EV Smart Charging - AI Observer.json` (Nordpool timpris)
-3. Uppdatera credentials (HA-token, Mistral API-nyckel, Google Sheets service account)
-4. Uppdatera entity-IDs (se [Anpassning](#anpassning))
-
-### 4. Importera HA-automationer
-
-Kopiera filerna i `ha-automations/` till din HA `automations.yaml` eller importera via HA UI.
-
-### 5. Aktivera
-
-Publish workflowet i n8n → det körs var 15:e minut (Tibber) eller varje timme (Nordpool) i observer-läge.
-
-## Anpassning
-
-### Entity-ID Mappning
-
-Redigera filen `templates/entity-config.yaml` med dina entiteter:
-
-```yaml
-# Laddbox
-charger_status: sensor.a1_status              # Ändra till din laddbox
-charger_switch: switch.a1_laddboxen_aktiverad
-charger_power: sensor.a1_effekt
-
-# Bil
-car_soc: sensor.wv2zzzeb9rh001501_battery_level  # Ändra till din bil
-car_range: sensor.wv2zzzeb9rh001501_electric_range
-car_cable: binary_sensor.wv2zzzeb9rh001501_charging_cable_connected
-
-# Energi
-electricity_price: sensor.nordpool_kwh_se3_sek_2_10_025
-solar_production: sensor.solaredge_aktuell_effekt
-cheap_electricity: binary_sensor.billig_el
-
-# Lastbalansering
-phase_load: sensor.huset_max_fasbelastning
-pool_heater: switch.poolvarme_ovrigt_2
-```
-
-### Tröskelvärden
-
-| Parameter | Default | Beskrivning |
-|-----------|---------|-------------|
-| `cheap_price_threshold` | 1.00 kr/kWh | Ladda under detta pris |
-| `medium_price_threshold` | 2.00 kr/kWh | Ladda bara med sol/låg SoC |
-| `emergency_soc` | 15% | Nödladda oavsett pris |
-| `fuse_limit_high` | 24.5A | Stäng av laddning |
-| `fuse_limit_low` | 20.0A | Återställ (hysteres) |
-| `fuse_delay_off` | 45 sek | Vänta ut startpikar |
-| `fuse_delay_on` | 5 min | Vänta före återställning |
-| `solar_min_watts` | 2000W | Minimum för sol-laddning |
-
-## Filstruktur
-
-```
-ai-ev-charging/
-├── README.md                          # Denna fil
-├── LICENSE
-├── docs/
-│   ├── systemdokumentation.html       # Komplett systemdokumentation
-│   └── analysrapport-feb2026.html     # Första analysrapporten (66 tim data)
-├── n8n-workflows/
-│   ├── EV Smart Charging - AI Observer.json          # Nordpool (timpris)
-│   └── EV Smart Charging - Tibber Pulse Quarter Price.json  # Tibber (kvartspris)
-├── ha-automations/
-│   ├── smart-charging.yaml            # Huvudautomation: smart laddning
-│   ├── load-protection-off.yaml       # Säkerhet: rädda huvudsäkringen
-│   └── load-protection-restore.yaml   # Säkerhet: återställ efter hög last
-└── templates/
-    └── entity-config.yaml             # Mall för entity-IDs
-```
-
-## AI-beslut
-
-### Tibber Pulse (kvartspris) – rekommenderat
-
-AI:n använder Tibbers `intraday_price_ranking` (0% = billigast, 100% = dyrast) för smartare beslut:
-
-| Prisranking | Beslut | Ampere |
-|-------------|--------|--------|
-| < 25% (billigaste kvarten) | ✅ Ladda alltid | 16A |
-| 25–50% | ✅ Ladda | 12–16A |
-| 50–75% (mittzon) | ⚠️ Ladda med låg ström om SoC < 40%, annars vänta | 8A |
-| > 75% (dyraste kvarten) | ❌ Vänta om SoC > 30% | 0A |
-| SoC < 30% | 🔴 Ladda oavsett pris | 16A |
-
-> **Anti-flipflop:** I mittzonen (40–60% ranking) väljer AI:n alltid "charge" med lägre ampere (8A) istället för att växla mellan charge/wait varannan kvart. Mjuk övergång istället för hård brytpunkt.
-
-### Nordpool (timpris) – alternativ
-
-| Elpris | Beslut | Ampere |
-|--------|--------|--------|
-| < 1 kr/kWh | ✅ Ladda | 16A (max) |
-| Under dagens genomsnitt | ✅ Ladda | 12–16A |
-| Nära dagens lägsta (inom 10 öre) | ✅ Ladda | 16A |
-| 1–2 kr/kWh (över snitt) | ⚠️ Bara med sol eller låg SoC | 6–12A |
-| > 2 kr/kWh | ❌ Vänta | 0A |
-
-> **Lärdom:** Statiska trösklar ("ladda under 1 kr") missar att 1.08 kr kan vara nattens billigaste pris. AI:n jämför därför mot dagens min/max/genomsnitt för smartare beslut.
-
-### Exempel (Tibber Pulse)
-
-```json
+SVARA ENDAST MED ETT JSON-OBJEKT I EXAKT DETTA FORMAT (inga backticks, ingen markdown):
 {
-  "action": "charge",
-  "reason": "Prisranking 12% – bland billigaste kvarten idag",
-  "recommended_amps": 16
+  "ev_action": "charge" eller "wait",
+  "ev_amps": siffran 8 till 16 (eller 0 om wait),
+  "pool_action": "on" eller "off",
+  "reason": "Kort motivering till varför."
 }
-```
 
-## Roadmap
 
-- [x] **Fas 1:** Observer-läge – AI loggar beslut utan styrning
-- [x] **Fas 1b:** Google Sheets-loggning – AI vs HA jämförelse
-- [x] **Fas 1c:** Kvartsprisoptimering med Tibber Pulse (var 15:e min)
-- [x] **Fas 1d:** [Första analysrapporten](docs/analysrapport-feb2026.html) – 66 timmar data
-- [x] **Fas 1e:** Anti-flipflop: mittzon-regler och stabilare beslut
-- [x] **Fas 1f:** Datakvalitetsfix: prisformat i Google Sheets
-- [ ] **Fas 2:** Dynamisk ampere-styrning (6–16A baserat på sol/pris)
-- [ ] **Fas 3:** Mönsterigenkänning (körmönster, veckodagar, väder)
-- [ ] **Fas 4:** Helhemoptimering (belysning, uppvärmning, effekttoppar)
+⚙️ Home Assistant Hjälpare (Helpers)
+För att bygga den fulla upplevelsen, lägg till dessa under Inställningar -> Hjälpare:
+input_boolean.tvinga_poolvarme - Switch för manuell styrning.
+input_boolean.tvinga_billaddning - Switch för manuell styrning av EV.
+input_text.ai_energi_master - Textfält som AI:n skriver sin status till.
 
-## Besparingsanalys
-
-### Resultat: 5 dagars data (20–25 feb 2026)
-
-| Scenario | Snittpris | Kostnad (48 kWh) |
-|----------|-----------|------------------|
-| **HA-automation (faktiskt)** | 1.11 kr/kWh | 53 kr |
-| **AI optimal (hade kunnat)** | 0.54 kr/kWh | 26 kr |
-| **Besparing** | **0.57 kr/kWh** | **27 kr (51%)** |
-
-Extrapolerat: **~165 kr/mån** i besparing. Största vinsten: AI:n hade laddat kvällen 21 feb vid 0.44–0.58 kr istället för kvällen 22 feb vid 1.06–1.13 kr.
-
-### Google Sheets-loggning
-
-Systemet loggar automatiskt var 15:e minut till Google Sheets för att jämföra AI:ns rekommendationer mot HA-automationens faktiska beslut.
-
-**Loggade datapunkter:**
-
-| Kolumn | Beskrivning |
-|--------|-------------|
-| Timestamp | Tidpunkt för analys |
-| Elpris | Aktuellt pris (kr/kWh) |
-| Pris_Min | Dagens lägsta pris |
-| Pris_Max | Dagens högsta pris |
-| Pris_Snitt | Dagens genomsnittspris |
-| SoC | Bilens batterinivå (%) |
-| Sol_W | Solproduktion (W) |
-| AI_Action | AI:ns rekommendation (charge/wait) |
-| AI_Amps | Rekommenderad laddström (0–16A) |
-| HA_Laddade | Laddboxens faktiska status |
-
-**Setup:**
-1. Skapa ett Google Sheet med headers enligt ovan
-2. Skapa en Service Account i Google Cloud Console
-3. Aktivera Google Sheets API + Google Drive API
-4. Dela sheetet med service accountens e-postadress
-5. Lägg till Google Sheets-noden i n8n-workflowet
-
-Datan kan sedan användas för att beräkna: *"Om AI:n hade styrt – hur mycket hade vi sparat jämfört med den vanliga automationen?"*
-
-## Två-bilars-hantering
-
-Systemet hanterar två elbilar som delar en laddbox:
-
-- **Uppkopplad bil** (t.ex. VW ID): SoC läses direkt via API
-- **Ej uppkopplad bil** (t.ex. Renault Zoe): SoC anges manuellt via `input_number` i HA
-- **Identifiering:** Om VW:ns kabel inte är ansluten och laddboxen visar "awaiting_start" → det är Zoe
-
-## Lärdomar
-
-| Problem | Lösning |
-|---------|---------|
-| Statiska priströsklar ("ladda under 1 kr") missar relativt billiga timmar | Använd `intraday_price_ranking` istället för absoluta priser |
-| AI flippar charge/wait varannan kvart vid gränsvärden | Mittzon-regel: 40–60% ranking → charge med lägre ampere (8A) |
-| Google Sheets tolkar `=0.988` som formel | Wrappa med `'' +` i n8n för ren strängoutput |
-| Bilen disconnected ~75% av tiden | Rutin: koppla in bilen varje kväll, AI:n väljer bästa laddtillfälle |
-
-## Bidra
-
-Pull requests välkomna! Särskilt intresserad av:
-- Stöd för fler laddboxar (Zaptec, Wallbox, Go-e)
-- Fler bil-integrationer
-- Förbättrade AI-prompts
-- Dashboard-mallar för HA
-
-## Tack till
-
-- [Home Assistant](https://www.home-assistant.io/) – Smart home-plattformen
-- [n8n](https://n8n.io/) – Workflow-automation
-- [Mistral AI](https://mistral.ai/) – Europeisk AI-modell
-- [Easee](https://easee.com/) – Laddbox-integration
-- [Tibber](https://tibber.com/) – Kvartspris via Pulse
-- [Nordpool](https://github.com/custom-components/nordpool) – Elpris-integration
-- [Proxmox VE Helper Scripts](https://community-scripts.github.io/ProxmoxVE/) – n8n LXC-installation
-
-## Licens
-
-MIT – Använd fritt, dela gärna!
+N8N JSON Import: Kom ihåg att ladda ner ditt flöde från n8n som en `.json`-fil och lägga i `n8n-workflows/`-mappen i ditt repo, så att besökare enkelt kan importera hela grafen.
